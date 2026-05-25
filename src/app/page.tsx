@@ -112,8 +112,8 @@ export default function Page() {
   const [statusMsg,   setStatusMsg]   = useState('Listo — pulsa buscar para consultar UEX')
   const [warning,     setWarning]     = useState('')
   const [isFallback,  setIsFallback]  = useState(false)
-  const [lastFetch,   setLastFetch]   = useState<Date|null>(null)
-  const [countdown,   setCountdown]   = useState('')
+  const [dataTimestamp, setDataTimestamp] = useState<number|null>(null)
+  const [dataAge,       setDataAge]       = useState('')
 
   const scu = SHIPS[shipIdx].scu
 
@@ -151,7 +151,8 @@ export default function Page() {
       })
 
       setRoutes(data)
-      setLastFetch(new Date())
+      const maxTs = data.reduce((mx: number, r: Route) => r.date_added > mx ? r.date_added : mx, 0)
+      if (maxTs > 0) setDataTimestamp(maxTs)
       setStatus('ok')
       setStatusMsg(`${data.length} rutas encontradas — datos en tiempo real de UEX`)
     } catch (e) {
@@ -163,6 +164,8 @@ export default function Page() {
           (system==='all' || r.origin_star_system_name.toLowerCase()===system)
       })
       setRoutes(fallback)
+      const maxTsFb = fallback.reduce((mx: number, r: Route) => r.date_added > mx ? r.date_added : mx, 0)
+      if (maxTsFb > 0) setDataTimestamp(maxTsFb)
       setStatus('error')
       setIsFallback(true)
       setStatusMsg('Error conectando con UEX — mostrando datos en caché')
@@ -175,21 +178,23 @@ export default function Page() {
   // Countdown timer — UEX updates every 60 min
   useEffect(() => {
     const tick = () => {
-      if (!lastFetch) { setCountdown('—'); return }
-      const elapsed = Math.floor((Date.now() - lastFetch.getTime()) / 1000)
-      const remaining = Math.max(0, 3600 - elapsed)
-      const m = Math.floor(remaining / 60)
-      const s = remaining % 60
-      if (remaining === 0) {
-        setCountdown('¡Datos actualizables!')
+      if (!dataTimestamp) { setDataAge('—'); return }
+      const ageSeconds = Math.floor(Date.now() / 1000 - dataTimestamp)
+      const h = Math.floor(ageSeconds / 3600)
+      const m = Math.floor((ageSeconds % 3600) / 60)
+      const s = ageSeconds % 60
+      if (h > 0) {
+        setDataAge(`Datos de hace ${h}h ${m}m`)
+      } else if (m > 0) {
+        setDataAge(`Datos de hace ${m}m ${s}s`)
       } else {
-        setCountdown(`Próx. actualización UEX: ${m}:${s.toString().padStart(2,'0')}`)
+        setDataAge(`Datos de hace ${s}s`)
       }
     }
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
-  }, [lastFetch])
+  }, [dataTimestamp])
 
   const sorted = [...routes].sort((a, b) => {
     if (sortKey === 'profit')     return getProfit(b, scu) - getProfit(a, scu)
@@ -364,9 +369,9 @@ export default function Page() {
         <div className="status">
           <div className={`dot ${status === 'idle' ? '' : status}`} />
           <span>{statusMsg}</span>
-          {lastFetch && (
-            <span style={{marginLeft:'auto',fontFamily:"'Share Tech Mono',monospace",fontSize:'.65rem',color: countdown.includes('!') ? '#00ff88' : '#7a9cc0',whiteSpace:'nowrap'}}>
-              ⏱ {countdown}
+          {dataAge && dataAge !== '—' && (
+            <span style={{marginLeft:'auto',fontFamily:"'Share Tech Mono',monospace",fontSize:'.65rem',color:'#7a9cc0',whiteSpace:'nowrap'}}>
+              🕐 {dataAge}
             </span>
           )}
         </div>
