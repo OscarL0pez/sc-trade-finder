@@ -45,6 +45,7 @@ type Route = {
   volatility_destination: number
   distance: number
   score: number
+  date_added: number
 }
 
 type SortKey = 'profit' | 'roi' | 'investment' | 'ppu' | 'apm' | 'apgm'
