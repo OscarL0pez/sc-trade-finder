@@ -6,74 +6,76 @@ const UEX_BASE = 'https://api.uexcorp.space/2.0'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
-  const query = (searchParams.get('q') || '').toLowerCase().trim()
+  const listOnly = searchParams.get('list') === '1'
+  const query    = (searchParams.get('q') || '').toLowerCase().trim()
   const directId = searchParams.get('id') ? parseInt(searchParams.get('id')!) : null
+  const directName = searchParams.get('name') || ''
 
-  if (!query || query.length < 2) {
-    return NextResponse.json({ status: 'ok', data: [], commodities: [] })
-  }
-
-  // If direct ID provided, skip commodity search
-  let commodity: { id: number; name: string; code: string } | null = null
-
-  if (directId) {
-    // Fetch prices directly by known id
-    commodity = { id: directId, name: query, code: '' }
-  } else {
-    // Step 1: fetch all commodities and filter by name
-    const commRes = await fetch(`${UEX_BASE}/commodities`, {
+  // ── Mode 1: return full commodity list ──────────────────────────────────────
+  if (listOnly) {
+    const res = await fetch(`${UEX_BASE}/commodities`, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'SC-Trade-Finder/1.0' },
       next: { revalidate: 86400 },
     })
-    if (!commRes.ok) return NextResponse.json({ status: 'error', data: [] })
-    const commJson = await commRes.json()
-    const allComms: { id: number; name: string; code: string }[] = commJson.data || []
-
-    const matches = allComms.filter((c) =>
-      c.name.toLowerCase().includes(query) || c.code.toLowerCase().includes(query)
+    if (!res.ok) return NextResponse.json({ status: 'error', data: [] })
+    const json = await res.json()
+    return NextResponse.json(
+      { status: 'ok', data: (json.data || []).map((c: { id: number; name: string; code: string }) => ({ id: c.id, name: c.name, code: c.code })) },
+      { headers: { 'Cache-Control': 'public, s-maxage=86400' } }
     )
-
-    if (matches.length === 0) return NextResponse.json({ status: 'ok', data: [], commodities: [] })
-
-    // Multiple matches — return list for user to pick
-    if (matches.length > 1) {
-      return NextResponse.json({ status: 'ok', data: [], commodities: matches.slice(0, 12) })
-    }
-
-    commodity = matches[0]
   }
 
-  // Fetch sell prices for this commodity
-  const pricesRes = await fetch(
-    `${UEX_BASE}/commodities_prices?id_commodity=${commodity.id}`,
-    {
-      headers: { 'Accept': 'application/json', 'User-Agent': 'SC-Trade-Finder/1.0' },
-      next: { revalidate: 1800 },
-    }
+  // ── Mode 2: fetch sell prices by commodity id ────────────────────────────────
+  if (directId) {
+    const pricesRes = await fetch(
+      `${UEX_BASE}/commodities_prices?id_commodity=${directId}`,
+      {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'SC-Trade-Finder/1.0' },
+        next: { revalidate: 1800 },
+      }
+    )
+    if (!pricesRes.ok) return NextResponse.json({ status: 'error', data: [] })
+    const pricesJson = await pricesRes.json()
+    const prices: unknown[] = pricesJson.data || []
+    const buyers = prices.filter((p: unknown) => {
+      const r = p as { price_sell: number; scu_sell: number }
+      return r.price_sell > 0 && r.scu_sell > 0
+    })
+    return NextResponse.json(
+      { status: 'ok', commodity: { id: directId, name: directName, code: '' }, commodities: [], data: buyers },
+      { headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, s-maxage=1800' } }
+    )
+  }
+
+  // ── Mode 3: legacy text search (fallback) ────────────────────────────────────
+  if (!query || query.length < 2) {
+    return NextResponse.json({ status: 'ok', data: [], commodities: [] })
+  }
+  const commRes = await fetch(`${UEX_BASE}/commodities`, {
+    headers: { 'Accept': 'application/json', 'User-Agent': 'SC-Trade-Finder/1.0' },
+    next: { revalidate: 86400 },
+  })
+  if (!commRes.ok) return NextResponse.json({ status: 'error', data: [] })
+  const commJson = await commRes.json()
+  const allComms: { id: number; name: string; code: string }[] = commJson.data || []
+  const matches = allComms.filter(c =>
+    c.name.toLowerCase().includes(query) || c.code.toLowerCase().includes(query)
   )
+  if (matches.length === 0) return NextResponse.json({ status: 'ok', data: [], commodities: [] })
+  if (matches.length > 1)   return NextResponse.json({ status: 'ok', data: [], commodities: matches.slice(0, 12) })
+
+  const commodity = matches[0]
+  const pricesRes = await fetch(`${UEX_BASE}/commodities_prices?id_commodity=${commodity.id}`, {
+    headers: { 'Accept': 'application/json', 'User-Agent': 'SC-Trade-Finder/1.0' },
+    next: { revalidate: 1800 },
+  })
   if (!pricesRes.ok) return NextResponse.json({ status: 'error', data: [] })
   const pricesJson = await pricesRes.json()
-  const prices: unknown[] = pricesJson.data || []
-
-  // Terminals that BUY this commodity from the player (price_sell = what terminal pays)
-  const buyers = prices.filter((p: unknown) => {
-    const r = p as { price_sell: number; scu_sell: number }
-    return r.price_sell > 0 && r.scu_sell > 0
-  })
-
-  // If commodity name was just the id placeholder, update from first result
-  if (buyers.length > 0 && !directId) {
-    const first = buyers[0] as { commodity_name?: string; commodity_code?: string }
-    if (first.commodity_name) commodity = { ...commodity, name: first.commodity_name, code: first.commodity_code || '' }
-  }
-
+  const buyers = (pricesJson.data || []).filter((p: { price_sell: number; scu_sell: number }) =>
+    p.price_sell > 0 && p.scu_sell > 0
+  )
   return NextResponse.json(
     { status: 'ok', commodity, commodities: [], data: buyers },
-    {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, s-maxage=1800, stale-while-revalidate=300',
-      },
-    }
+    { headers: { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, s-maxage=1800' } }
   )
 }

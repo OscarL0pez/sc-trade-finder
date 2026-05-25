@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 
 const SHIPS = [
   { label: 'C1 Spirit (64 SCU)',       scu: 64  },
@@ -143,17 +143,49 @@ function getFallback(scu: number): Route[] {
 }
 
 // ── Sell Panel ────────────────────────────────────────────────────────────────
-function SellPanel({ scu, sellQuery, setSellQuery, sellStatus, sellMsg, sellCommodity, sellMatches, sellResults, sellOrbOnly, setSellOrbOnly, onSearch, onPick }: {
+type Commodity = { id: number; name: string; code: string }
+
+function SellPanel({ scu, sellOrbOnly, setSellOrbOnly, onSelectCommodity, sellStatus, sellMsg, sellCommodity, sellResults }: {
   scu: number
-  sellQuery: string; setSellQuery: (v:string)=>void
-  sellStatus: string; sellMsg: string
-  sellCommodity: {id:number,name:string,code:string}|null
-  sellMatches: {id:number,name:string,code:string}[]
-  sellResults: SellResult[]
   sellOrbOnly: boolean; setSellOrbOnly: (v:boolean)=>void
-  onSearch: (q:string)=>void
-  onPick: (c:{id:number,name:string,code:string})=>void
+  onSelectCommodity: (c:Commodity)=>void
+  sellStatus: string; sellMsg: string
+  sellCommodity: Commodity|null
+  sellResults: SellResult[]
 }) {
+  const [query,        setQuery]        = React.useState('')
+  const [allComms,     setAllComms]     = React.useState<Commodity[]>([])
+  const [suggestions,  setSuggestions]  = React.useState<Commodity[]>([])
+  const [showDropdown, setShowDropdown] = React.useState(false)
+  const [commsLoaded,  setCommsLoaded]  = React.useState(false)
+  const inputRef = React.useRef<HTMLInputElement>(null)
+
+  // Load full commodity list once
+  React.useEffect(() => {
+    fetch('/api/sell?list=1')
+      .then(r => r.json())
+      .then(j => { setAllComms(j.data || []); setCommsLoaded(true) })
+      .catch(() => {})
+  }, [])
+
+  // Filter suggestions as user types
+  React.useEffect(() => {
+    if (!query || query.length < 2) { setSuggestions([]); setShowDropdown(false); return }
+    const q = query.toLowerCase()
+    const hits = allComms
+      .filter(c => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q))
+      .slice(0, 12)
+    setSuggestions(hits)
+    setShowDropdown(hits.length > 0)
+  }, [query, allComms])
+
+  const pick = (c: Commodity) => {
+    setQuery(c.name)
+    setSuggestions([])
+    setShowDropdown(false)
+    onSelectCommodity(c)
+  }
+
   const filtered = sellOrbOnly
     ? sellResults.filter(r => isOrbitalStation(r.terminal_name))
     : sellResults
@@ -161,30 +193,40 @@ function SellPanel({ scu, sellQuery, setSellQuery, sellStatus, sellMsg, sellComm
 
   return (
     <div>
-      {/* Search bar */}
+      {/* Search bar with autocomplete */}
       <div style={{background:'#0a1428',border:'1px solid #1a3a6e',borderRadius:'10px',padding:'18px',marginBottom:'16px'}}>
         <div style={{display:'flex',gap:'10px',alignItems:'flex-end'}}>
-          <div style={{flex:1}}>
+          <div style={{flex:1,position:'relative'}}>
             <label style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'.62rem',color:'#7a9cc0',letterSpacing:'.15em',textTransform:'uppercase',display:'block',marginBottom:'6px'}}>
-              Commodity a vender
+              Commodity a vender {!commsLoaded && <span style={{color:'#ffd700'}}>cargando lista...</span>}
             </label>
             <input
+              ref={inputRef}
               type="text"
-              placeholder="ej: scrap, copper, agricultural..."
-              value={sellQuery}
-              onChange={e => setSellQuery(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && onSearch(sellQuery)}
-              style={{background:'#070d1a',border:'1px solid #1a3a6e',color:'#c8d8f0',padding:'8px 10px',borderRadius:'6px',fontFamily:"'Share Tech Mono',monospace",fontSize:'.8rem',outline:'none',width:'100%'}}
+              placeholder="ej: aluminum, scrap, copper..."
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
+              onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+              style={{background:'#070d1a',border:'1px solid #1a3a6e',color:'#c8d8f0',padding:'8px 10px',borderRadius:'6px',fontFamily:"'Share Tech Mono',monospace",fontSize:'.8rem',outline:'none',width:'100%',transition:'border-color .2s'}}
             />
+            {/* Dropdown */}
+            {showDropdown && (
+              <div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:100,marginTop:'2px',background:'#0d1f3c',border:'1px solid #00d4ff',borderRadius:'6px',overflow:'hidden',boxShadow:'0 8px 24px rgba(0,0,0,.6)'}}>
+                {suggestions.map(c => (
+                  <div key={c.id}
+                    onMouseDown={() => pick(c)}
+                    style={{padding:'8px 12px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'background .1s',fontFamily:"'Share Tech Mono',monospace",fontSize:'.78rem'}}
+                    onMouseEnter={e => (e.currentTarget.style.background='#1a3a6e')}
+                    onMouseLeave={e => (e.currentTarget.style.background='transparent')}
+                  >
+                    <span style={{color:'#c8d8f0'}}>{c.name}</span>
+                    <span style={{color:'#7a9cc0',fontSize:'.65rem'}}>{c.code}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <button
-            onClick={() => onSearch(sellQuery)}
-            disabled={sellQuery.length < 2}
-            className="btn"
-            style={{width:'auto',padding:'10px 20px',whiteSpace:'nowrap'}}
-          >
-            🔍 Buscar
-          </button>
           <button
             onClick={() => setSellOrbOnly(!sellOrbOnly)}
             style={{
@@ -211,25 +253,6 @@ function SellPanel({ scu, sellQuery, setSellQuery, sellStatus, sellMsg, sellComm
         </div>
       )}
 
-      {/* Commodity picker when multiple matches */}
-      {sellMatches.length > 0 && (
-        <div style={{background:'#0a1428',border:'1px solid #1a3a6e',borderRadius:'10px',padding:'16px',marginBottom:'16px'}}>
-          <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'.65rem',color:'#7a9cc0',marginBottom:'10px',letterSpacing:'.1em'}}>SELECCIONA LA COMMODITY:</div>
-          <div style={{display:'flex',flexWrap:'wrap',gap:'8px'}}>
-            {sellMatches.map(c => (
-              <button key={c.id} onClick={() => onPick(c)} style={{
-                padding:'6px 14px',borderRadius:'5px',background:'#070d1a',border:'1px solid #1a3a6e',
-                color:'#c8d8f0',fontFamily:"'Share Tech Mono',monospace",fontSize:'.75rem',cursor:'pointer',
-                transition:'all .15s',
-              }}
-              onMouseEnter={e => { (e.target as HTMLButtonElement).style.borderColor='#00d4ff'; (e.target as HTMLButtonElement).style.color='#00d4ff' }}
-              onMouseLeave={e => { (e.target as HTMLButtonElement).style.borderColor='#1a3a6e'; (e.target as HTMLButtonElement).style.color='#c8d8f0' }}
-              >{c.name}</button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Results */}
       {sorted.length > 0 && (
         <div className="cards">
@@ -243,12 +266,10 @@ function SellPanel({ scu, sellQuery, setSellQuery, sellStatus, sellMsg, sellComm
               <div key={r.id_terminal + '-' + i} className={`card${i===0?' r1':i===1?' r2':i===2?' r3':''}`}
                 style={{animationDelay:`${i*0.04}s`}}>
                 <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'12px',flexWrap:'wrap'}}>
-                  <span style={{fontFamily:"'Orbitron',monospace",fontSize:'.75rem',fontWeight:700,color:'#c8d8f0'}}>
-                    #{i+1}
-                  </span>
+                  <span style={{fontFamily:"'Orbitron',monospace",fontSize:'.75rem',fontWeight:700,color:'#c8d8f0'}}>#{i+1}</span>
                   <div className="loc sell" style={{flex:1}}>
                     💰 {r.terminal_name}
-                    <small>{location} · {r.star_system_name}</small>
+                    <small>{location}{location && r.star_system_name ? ' · ' : ''}{r.star_system_name}</small>
                   </div>
                   {isOrb && <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'.58rem',padding:'2px 7px',borderRadius:'3px',background:'rgba(0,212,255,.1)',border:'1px solid rgba(0,212,255,.3)',color:'#00d4ff'}}>🛸 ORBITAL</span>}
                 </div>
@@ -265,10 +286,10 @@ function SellPanel({ scu, sellQuery, setSellQuery, sellStatus, sellMsg, sellComm
                     <span className="ml">Capacidad</span>
                     <span className="mv">{r.scu_sell.toLocaleString()} SCU</span>
                   </div>
-                  {statusLabel && <div className="metric">
+                  {statusLabel ? <div className="metric">
                     <span className="ml">Estado</span>
                     <span className="mv">{statusLabel}</span>
-                  </div>}
+                  </div> : null}
                 </div>
               </div>
             )
@@ -297,11 +318,9 @@ export default function Page() {
   const [dataAge,       setDataAge]       = useState('')
   // Sell mode
   const [activeTab,     setActiveTab]     = useState<'buy'|'sell'>('buy')
-  const [sellQuery,     setSellQuery]     = useState('')
   const [sellStatus,    setSellStatus]    = useState<'idle'|'loading'|'ok'|'error'>('idle')
   const [sellMsg,       setSellMsg]       = useState('')
   const [sellCommodity, setSellCommodity] = useState<{id:number,name:string,code:string}|null>(null)
-  const [sellMatches,   setSellMatches]   = useState<{id:number,name:string,code:string}[]>([])
   const [sellResults,   setSellResults]   = useState<SellResult[]>([])
   const [sellOrbOnly,   setSellOrbOnly]   = useState(false)
 
@@ -365,22 +384,15 @@ export default function Page() {
 
   useEffect(() => { fetchRoutes() }, [])
 
-  const fetchSell = useCallback(async (q: string, id?: number) => {
-    const param = id ? `q=${encodeURIComponent(q)}&id=${id}` : `q=${encodeURIComponent(q)}`
-    if (q.length < 2) return
+  const fetchSell = useCallback(async (name: string, id: number) => {
     setSellStatus('loading')
-    setSellMsg('Buscando...')
-    setSellMatches([])
+    setSellMsg('Buscando terminales...')
     setSellResults([])
     setSellCommodity(null)
     try {
-      const res = await fetch(`/api/sell?${param}`)
+      const res = await fetch(`/api/sell?id=${id}&name=${encodeURIComponent(name)}`)
       const json = await res.json()
-      if (json.commodities && json.commodities.length > 1) {
-        setSellMatches(json.commodities)
-        setSellMsg(`${json.commodities.length} resultados — elige uno`)
-        setSellStatus('ok')
-      } else if (json.commodity && json.data) {
+      if (json.commodity && json.data) {
         setSellCommodity(json.commodity)
         setSellResults(json.data)
         setSellMsg(`${json.data.length} terminales compran ${json.commodity.name}`)
@@ -530,14 +542,11 @@ export default function Page() {
         {activeTab === 'sell' && (
           <SellPanel
             scu={scu}
-            sellQuery={sellQuery} setSellQuery={setSellQuery}
             sellStatus={sellStatus} sellMsg={sellMsg}
             sellCommodity={sellCommodity}
-            sellMatches={sellMatches}
             sellResults={sellResults}
             sellOrbOnly={sellOrbOnly} setSellOrbOnly={setSellOrbOnly}
-            onSearch={(q) => fetchSell(q)}
-            onPick={(c) => { setSellQuery(c.name); fetchSell(c.name, c.id) }}
+            onSelectCommodity={(c) => { setSellCommodity(c); fetchSell(c.name, c.id) }}
           />
         )}
 
