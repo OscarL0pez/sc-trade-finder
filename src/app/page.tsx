@@ -13,16 +13,44 @@ const SHIPS = [
 ]
 
 // Terminal accessibility filter
-const HARD_TERMINALS = [
-  'lorville','area18','area 18','orison','new babbage',
-  'hdms-','shubin','bezdek','arccorp mining','rayari','kudre',
-  'devlin','lathan','tdd','admin office','security post',
+// Whitelist de estaciones orbitales — solo estas flotan en el espacio sin aterrizar
+const ORBITAL_STATIONS = [
+  // Stanton
+  'everus harbor',      // Hurston L1
+  'hdms-pinehaven',     // Hurston L2 — excepción, es accesible en órbita
+  'baijini point',      // ArcCorp L1
+  'lyria',              // ArcCorp L2
+  'wala',               // ArcCorp L3
+  'porto olisar',       // Crusader (legacy)
+  'port olisar',        // Crusader (legacy)
+  'port tressler',      // MicroTech L1
+  'clio',               // MicroTech L2
+  'euterpe',            // MicroTech L3
+  'seraphim',           // Crusader L1
+  'magnus gateway',     // Magnus
+  'nyx gateway',        // Nyx
+  'rest stop',          // generic rest stops
+  'truck stop',
+  'jump town',
+  // Pyro
+  'ruin station',
+  'orbituary',
+  'checkmate',
+  'pyro gateway',
+  'stanton gateway',
+  'bloodeagles',
+  'bloodshot',
 ]
 
-function isEasyAccess(terminalName: string): boolean {
-  if (!terminalName) return true
+function isOrbitalStation(terminalName: string): boolean {
+  if (!terminalName) return false
   const n = terminalName.toLowerCase()
-  return !HARD_TERMINALS.some(k => n.includes(k))
+  return ORBITAL_STATIONS.some(k => n.includes(k))
+}
+
+// Acceso fácil legacy (mantiene compatibilidad con filtro anterior)
+function isEasyAccess(terminalName: string): boolean {
+  return isOrbitalStation(terminalName)
 }
 
 type Route = {
@@ -356,7 +384,7 @@ export default function Page() {
                 width: '100%',
               }}
             >
-              {easyOnly ? '🚀 Solo estaciones' : '🌍 Todos los accesos'}
+              {easyOnly ? '🛸 Solo orbitales' : '🌍 Todos los accesos'}
             </button>
           </div>
           <div className="fg">
