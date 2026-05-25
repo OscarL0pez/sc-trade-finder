@@ -112,6 +112,8 @@ export default function Page() {
   const [statusMsg,   setStatusMsg]   = useState('Listo — pulsa buscar para consultar UEX')
   const [warning,     setWarning]     = useState('')
   const [isFallback,  setIsFallback]  = useState(false)
+  const [lastFetch,   setLastFetch]   = useState<Date|null>(null)
+  const [countdown,   setCountdown]   = useState('')
 
   const scu = SHIPS[shipIdx].scu
 
@@ -149,6 +151,7 @@ export default function Page() {
       })
 
       setRoutes(data)
+      setLastFetch(new Date())
       setStatus('ok')
       setStatusMsg(`${data.length} rutas encontradas — datos en tiempo real de UEX`)
     } catch (e) {
@@ -168,6 +171,25 @@ export default function Page() {
   }, [scu, capital, system, minRoi, minFill, easyOnly])
 
   useEffect(() => { fetchRoutes() }, [])
+
+  // Countdown timer — UEX updates every 60 min
+  useEffect(() => {
+    const tick = () => {
+      if (!lastFetch) { setCountdown('—'); return }
+      const elapsed = Math.floor((Date.now() - lastFetch.getTime()) / 1000)
+      const remaining = Math.max(0, 3600 - elapsed)
+      const m = Math.floor(remaining / 60)
+      const s = remaining % 60
+      if (remaining === 0) {
+        setCountdown('¡Datos actualizables!')
+      } else {
+        setCountdown(`Próx. actualización UEX: ${m}:${s.toString().padStart(2,'0')}`)
+      }
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [lastFetch])
 
   const sorted = [...routes].sort((a, b) => {
     if (sortKey === 'profit')     return getProfit(b, scu) - getProfit(a, scu)
@@ -342,6 +364,11 @@ export default function Page() {
         <div className="status">
           <div className={`dot ${status === 'idle' ? '' : status}`} />
           <span>{statusMsg}</span>
+          {lastFetch && (
+            <span style={{marginLeft:'auto',fontFamily:"'Share Tech Mono',monospace",fontSize:'.65rem',color: countdown.includes('!') ? '#00ff88' : '#7a9cc0',whiteSpace:'nowrap'}}>
+              ⏱ {countdown}
+            </span>
+          )}
         </div>
 
         {warning && <div className="warn">⚠️ <span>{warning}</span></div>}
