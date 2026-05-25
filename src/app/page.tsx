@@ -78,6 +78,21 @@ type Route = {
 
 type SortKey = 'profit' | 'roi' | 'investment' | 'ppu' | 'apm' | 'apgm'
 
+type SellResult = {
+  id_terminal: number
+  terminal_name: string
+  star_system_name: string | null
+  planet_name: string | null
+  orbit_name: string | null
+  space_station_name: string | null
+  outpost_name: string | null
+  city_name: string | null
+  price_sell: number   // what the terminal pays YOU per SCU
+  scu_sell: number     // how much stock they accept
+  status_sell: number | null
+  date_added: number
+}
+
 // QT speed ~333 Mm/s = 0.333 Gm/s
 // + ~3 min overhead (spooling, deceleration, docking)
 const QT_SPEED_GM_PER_MIN = 0.333 * 60 // 20 Gm/min
@@ -127,6 +142,143 @@ function getFallback(scu: number): Route[] {
   ]
 }
 
+// ── Sell Panel ────────────────────────────────────────────────────────────────
+function SellPanel({ scu, sellQuery, setSellQuery, sellStatus, sellMsg, sellCommodity, sellMatches, sellResults, sellOrbOnly, setSellOrbOnly, onSearch, onPick }: {
+  scu: number
+  sellQuery: string; setSellQuery: (v:string)=>void
+  sellStatus: string; sellMsg: string
+  sellCommodity: {id:number,name:string,code:string}|null
+  sellMatches: {id:number,name:string,code:string}[]
+  sellResults: SellResult[]
+  sellOrbOnly: boolean; setSellOrbOnly: (v:boolean)=>void
+  onSearch: (q:string)=>void
+  onPick: (c:{id:number,name:string,code:string})=>void
+}) {
+  const filtered = sellOrbOnly
+    ? sellResults.filter(r => isOrbitalStation(r.terminal_name))
+    : sellResults
+  const sorted = [...filtered].sort((a,b) => b.price_sell - a.price_sell)
+
+  return (
+    <div>
+      {/* Search bar */}
+      <div style={{background:'#0a1428',border:'1px solid #1a3a6e',borderRadius:'10px',padding:'18px',marginBottom:'16px'}}>
+        <div style={{display:'flex',gap:'10px',alignItems:'flex-end'}}>
+          <div style={{flex:1}}>
+            <label style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'.62rem',color:'#7a9cc0',letterSpacing:'.15em',textTransform:'uppercase',display:'block',marginBottom:'6px'}}>
+              Commodity a vender
+            </label>
+            <input
+              type="text"
+              placeholder="ej: scrap, copper, agricultural..."
+              value={sellQuery}
+              onChange={e => setSellQuery(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && onSearch(sellQuery)}
+              style={{background:'#070d1a',border:'1px solid #1a3a6e',color:'#c8d8f0',padding:'8px 10px',borderRadius:'6px',fontFamily:"'Share Tech Mono',monospace",fontSize:'.8rem',outline:'none',width:'100%'}}
+            />
+          </div>
+          <button
+            onClick={() => onSearch(sellQuery)}
+            disabled={sellQuery.length < 2}
+            className="btn"
+            style={{width:'auto',padding:'10px 20px',whiteSpace:'nowrap'}}
+          >
+            🔍 Buscar
+          </button>
+          <button
+            onClick={() => setSellOrbOnly(!sellOrbOnly)}
+            style={{
+              padding:'10px 14px',borderRadius:'6px',fontFamily:"'Share Tech Mono',monospace",
+              fontSize:'.65rem',fontWeight:600,cursor:'pointer',transition:'all .2s',whiteSpace:'nowrap',
+              background: sellOrbOnly ? 'rgba(0,255,136,0.15)' : '#070d1a',
+              border: `1px solid ${sellOrbOnly ? '#00ff88' : '#1a3a6e'}`,
+              color: sellOrbOnly ? '#00ff88' : '#7a9cc0',
+            }}
+          >
+            {sellOrbOnly ? '🛸 Solo orbitales' : '🌍 Todos'}
+          </button>
+        </div>
+      </div>
+
+      {/* Status */}
+      {sellStatus !== 'idle' && (
+        <div className="status" style={{marginBottom:'12px'}}>
+          <div className={`dot ${sellStatus}`}/>
+          <span>{sellMsg}</span>
+          {sellCommodity && <span style={{marginLeft:'auto',fontFamily:"'Share Tech Mono',monospace",fontSize:'.65rem',color:'#00d4ff'}}>
+            {sellCommodity.name} · {scu} SCU
+          </span>}
+        </div>
+      )}
+
+      {/* Commodity picker when multiple matches */}
+      {sellMatches.length > 0 && (
+        <div style={{background:'#0a1428',border:'1px solid #1a3a6e',borderRadius:'10px',padding:'16px',marginBottom:'16px'}}>
+          <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'.65rem',color:'#7a9cc0',marginBottom:'10px',letterSpacing:'.1em'}}>SELECCIONA LA COMMODITY:</div>
+          <div style={{display:'flex',flexWrap:'wrap',gap:'8px'}}>
+            {sellMatches.map(c => (
+              <button key={c.id} onClick={() => onPick(c)} style={{
+                padding:'6px 14px',borderRadius:'5px',background:'#070d1a',border:'1px solid #1a3a6e',
+                color:'#c8d8f0',fontFamily:"'Share Tech Mono',monospace",fontSize:'.75rem',cursor:'pointer',
+                transition:'all .15s',
+              }}
+              onMouseEnter={e => { (e.target as HTMLButtonElement).style.borderColor='#00d4ff'; (e.target as HTMLButtonElement).style.color='#00d4ff' }}
+              onMouseLeave={e => { (e.target as HTMLButtonElement).style.borderColor='#1a3a6e'; (e.target as HTMLButtonElement).style.color='#c8d8f0' }}
+              >{c.name}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Results */}
+      {sorted.length > 0 && (
+        <div className="cards">
+          {sorted.map((r, i) => {
+            const totalEarnings = r.price_sell * scu
+            const isOrb = isOrbitalStation(r.terminal_name)
+            const statusLabel = ['','Sin stock','Muy bajo','Bajo','Medio','Alto','Muy alto','Lleno'][r.status_sell||0] || ''
+            const location = [r.space_station_name, r.outpost_name, r.city_name, r.orbit_name, r.planet_name]
+              .filter(Boolean).join(' · ') || r.star_system_name || ''
+            return (
+              <div key={r.id_terminal + '-' + i} className={`card${i===0?' r1':i===1?' r2':i===2?' r3':''}`}
+                style={{animationDelay:`${i*0.04}s`}}>
+                <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'12px',flexWrap:'wrap'}}>
+                  <span style={{fontFamily:"'Orbitron',monospace",fontSize:'.75rem',fontWeight:700,color:'#c8d8f0'}}>
+                    #{i+1}
+                  </span>
+                  <div className="loc sell" style={{flex:1}}>
+                    💰 {r.terminal_name}
+                    <small>{location} · {r.star_system_name}</small>
+                  </div>
+                  {isOrb && <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'.58rem',padding:'2px 7px',borderRadius:'3px',background:'rgba(0,212,255,.1)',border:'1px solid rgba(0,212,255,.3)',color:'#00d4ff'}}>🛸 ORBITAL</span>}
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:'8px'}}>
+                  <div className="metric">
+                    <span className="ml">Precio/SCU</span>
+                    <span className="mv" style={{color:'#00ff88'}}>{r.price_sell.toLocaleString()} aUEC</span>
+                  </div>
+                  <div className="metric">
+                    <span className="ml">Total ({scu} SCU)</span>
+                    <span className="mv" style={{color:'#ffd700',fontWeight:700}}>{totalEarnings.toLocaleString()} aUEC</span>
+                  </div>
+                  <div className="metric">
+                    <span className="ml">Capacidad</span>
+                    <span className="mv">{r.scu_sell.toLocaleString()} SCU</span>
+                  </div>
+                  {statusLabel && <div className="metric">
+                    <span className="ml">Estado</span>
+                    <span className="mv">{statusLabel}</span>
+                  </div>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Page() {
   const [shipIdx,     setShipIdx]     = useState(0)
   const [capital,     setCapital]     = useState(500000)
@@ -143,6 +295,15 @@ export default function Page() {
   const [isFallback,  setIsFallback]  = useState(false)
   const [dataTimestamp, setDataTimestamp] = useState<number|null>(null)
   const [dataAge,       setDataAge]       = useState('')
+  // Sell mode
+  const [activeTab,     setActiveTab]     = useState<'buy'|'sell'>('buy')
+  const [sellQuery,     setSellQuery]     = useState('')
+  const [sellStatus,    setSellStatus]    = useState<'idle'|'loading'|'ok'|'error'>('idle')
+  const [sellMsg,       setSellMsg]       = useState('')
+  const [sellCommodity, setSellCommodity] = useState<{id:number,name:string,code:string}|null>(null)
+  const [sellMatches,   setSellMatches]   = useState<{id:number,name:string,code:string}[]>([])
+  const [sellResults,   setSellResults]   = useState<SellResult[]>([])
+  const [sellOrbOnly,   setSellOrbOnly]   = useState(false)
 
   const scu = SHIPS[shipIdx].scu
 
@@ -203,6 +364,36 @@ export default function Page() {
   }, [scu, capital, system, minRoi, minFill, easyOnly])
 
   useEffect(() => { fetchRoutes() }, [])
+
+  const fetchSell = useCallback(async (q: string, id?: number) => {
+    const param = id ? `q=${encodeURIComponent(q)}&id=${id}` : `q=${encodeURIComponent(q)}`
+    if (q.length < 2) return
+    setSellStatus('loading')
+    setSellMsg('Buscando...')
+    setSellMatches([])
+    setSellResults([])
+    setSellCommodity(null)
+    try {
+      const res = await fetch(`/api/sell?${param}`)
+      const json = await res.json()
+      if (json.commodities && json.commodities.length > 1) {
+        setSellMatches(json.commodities)
+        setSellMsg(`${json.commodities.length} resultados — elige uno`)
+        setSellStatus('ok')
+      } else if (json.commodity && json.data) {
+        setSellCommodity(json.commodity)
+        setSellResults(json.data)
+        setSellMsg(`${json.data.length} terminales compran ${json.commodity.name}`)
+        setSellStatus('ok')
+      } else {
+        setSellMsg('Sin resultados')
+        setSellStatus('ok')
+      }
+    } catch {
+      setSellMsg('Error conectando con UEX')
+      setSellStatus('error')
+    }
+  }, [])
 
   // Countdown timer — UEX updates every 60 min
   useEffect(() => {
@@ -320,7 +511,37 @@ export default function Page() {
           <div className="badge">SC 4.8.0</div>
         </header>
 
-        <div className="filters">
+        {/* Tab navigation */}
+        <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
+          {(['buy','sell'] as const).map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)} style={{
+              padding:'9px 22px',borderRadius:'6px',fontFamily:"'Orbitron',monospace",
+              fontSize:'.7rem',fontWeight:600,letterSpacing:'.1em',cursor:'pointer',transition:'all .2s',
+              background: activeTab===tab ? 'linear-gradient(135deg,#00d4ff22,#00d4ff44)' : '#070d1a',
+              border: `1px solid ${activeTab===tab ? '#00d4ff' : '#1a3a6e'}`,
+              color: activeTab===tab ? '#00d4ff' : '#7a9cc0',
+              boxShadow: activeTab===tab ? '0 0 20px rgba(0,212,255,.3)' : 'none',
+            }}>
+              {tab === 'buy' ? '📦 Buscar ruta' : '💰 Vender carga'}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'sell' && (
+          <SellPanel
+            scu={scu}
+            sellQuery={sellQuery} setSellQuery={setSellQuery}
+            sellStatus={sellStatus} sellMsg={sellMsg}
+            sellCommodity={sellCommodity}
+            sellMatches={sellMatches}
+            sellResults={sellResults}
+            sellOrbOnly={sellOrbOnly} setSellOrbOnly={setSellOrbOnly}
+            onSearch={(q) => fetchSell(q)}
+            onPick={(c) => { setSellQuery(c.name); fetchSell(c.name, c.id) }}
+          />
+        )}
+
+        {activeTab === 'buy' && (<><div className="filters">
           <div className="fg">
             <label>Nave</label>
             <select value={shipIdx} onChange={e => setShipIdx(+e.target.value)}>
@@ -531,6 +752,7 @@ export default function Page() {
             )
           })}
         </div>
+        </>)}
 
         <footer>
           Datos de <a href="https://uexcorp.space/trade/routes" target="_blank">UEX Corp</a> vía proxy — SC Trade Finder no está afiliado con CIG ni UEX
